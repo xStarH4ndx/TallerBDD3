@@ -16,6 +16,7 @@ DROP TABLE IF EXISTS Articulo;
 DROP TABLE IF EXISTS Categoria;
 DROP TABLE IF EXISTS Usuario;
 
+/*--------------------------CREACION DE LAS TABLAS-----------------------*/
 -- Crear tabla Usuario
 CREATE TABLE Usuario (
     ID_usuario SERIAL PRIMARY KEY,
@@ -101,7 +102,26 @@ CREATE TABLE Envio (
     FOREIGN KEY (ID_empresa) REFERENCES EmpresaTransporte(ID_empresa)
 );
 
--- Función para Registrar y Calcular el Monto Total de la Compra
+/*-------------------INSERCIONES----------------------------*/
+--Insertar datos de prueba en Usuario
+INSERT INTO Usuario (Rut, Nombre, Apellido, Contraseña, Tipo, Ciudad, Comuna, Calle, Numero) VALUES
+('12345678-9', 'Juan', 'Perez', 'password123', 'Registrado', 'Santiago', 'Centro', 'Av. Libertador', '1234'),
+('98765432-1', 'Maria', 'Gonzalez', 'password456', 'Proveedor', 'Valparaíso', 'Norte', 'Calle 1', '5678');
+
+--Insertar datos de prueba en Categoria
+INSERT INTO Categoria (Nombre, Descripcion) VALUES
+('Electrónica', 'Dispositivos electrónicos'),
+('Ropa', 'Vestimenta para todas las edades');
+
+--Insertar datos de prueba en Articulo
+INSERT INTO Articulo (Nombre, Descripcion, Precio, Color, Cantidad, Descuento, ID_categoria) VALUES
+('Teléfono', 'Teléfono móvil', 59990, 'Negro', 50, 10, 1),
+('Camiseta', 'Camiseta de algodón', 9990, 'Blanco', 100, 5, 2);
+
+
+
+/*----------------FUNCIONES Y PROCEDIMIENTOS----------------------------*/
+--1) Función para Registrar y Calcular el Monto Total de la Compra------
 CREATE OR REPLACE FUNCTION calcular_total_compra(p_id_compra INT)
 RETURNS DECIMAL AS $$
 DECLARE
@@ -151,7 +171,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Función para Simular una Compra
+--2)Función para Simular una Compra---------------------------------------------
 CREATE OR REPLACE FUNCTION simular_compra(p_id_usuario INT, p_productos INT[], p_cantidades INT[])
 RETURNS INT AS $$
 DECLARE
@@ -178,7 +198,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Procedimiento para Registrar Direcciones
+--3) Procedimiento para Registrar Direcciones---------------------------------------
 CREATE OR REPLACE PROCEDURE registrar_direcciones(p_id_compra INT, p_ciudad_entrega VARCHAR, p_comuna_entrega VARCHAR, p_calle_entrega VARCHAR, p_numero_entrega VARCHAR)
 LANGUAGE plpgsql AS $$
 DECLARE
@@ -222,26 +242,145 @@ BEGIN
 END;
 $$;
 
--- Insertar datos de prueba en Usuario
-INSERT INTO Usuario (Rut, Nombre, Apellido, Contraseña, Tipo, Ciudad, Comuna, Calle, Numero) VALUES
-('12345678-9', 'Juan', 'Perez', 'password123', 'Registrado', 'Santiago', 'Centro', 'Av. Libertador', '1234'),
-('98765432-1', 'Maria', 'Gonzalez', 'password456', 'Proveedor', 'Valparaíso', 'Norte', 'Calle 1', '5678');
+--4)Funcion para filtrar productos por categoria---------------------------------
+create or replace function filtrar_categoria(nombre_categoria varchar)
+returns table(
+	nombre varchar(100),
+	descripcion text,
+	precio decimal(10,2),
+	color varchar(30),
+	cantidad int
+) as $$
+begin
+	return query
+	select a.Nombre,a.Descripcion, a.Precio, a.Color,a.Cantidad
+	from Articulo as a
+	join Categoria as c on a.ID_categoria = c.ID_categoria
+	where nombre_categoria = c.Nombre;
+end;
+$$ language plpgsql;
 
--- Insertar datos de prueba en Categoría
-INSERT INTO Categoria (Nombre, Descripcion) VALUES
-('Electrónica', 'Dispositivos electrónicos'),
-('Ropa', 'Vestimenta para todas las edades');
+--5)Funcion para filtrar ventas por intervalo de fechas-------------------------
+create or replace function filtrar_ventas(fecha_inicio text,fecha_fin text)
+returns table(
+	ID_compra int,
+	Total decimal(10,2)
+) as $$
+begin
+	return query
+	select c.ID_compra,c.Total
+	from Compra as c
+	where c.Fecha between TO_DATE(fecha_inicio, 'DD-MM-YYYY') and TO_DATE(fecha_fin, 'DD-MM-YYYY');
+end;
+$$ language plpgsql;
 
--- Insertar datos de prueba en Artículo
-INSERT INTO Articulo (Nombre, Descripcion, Precio, Color, Cantidad, Descuento, ID_categoria) VALUES
-('Teléfono', 'Teléfono móvil', 59990, 'Negro', 50, 10, 1),
-('Camiseta', 'Camiseta de algodón', 9990, 'Blanco', 100, 5, 2);
+--6) Retornar el porcentaje de compras-----
+--7) Usuario con más descuento acumulado---
 
--- Probar las Funciones y Procedimientos
 
--- Simular una Compra
+/*--------------------------Probar las Funciones y Procedimientos--------------------------------*/
+--2)Simular una Compra
 SELECT simular_compra(1, ARRAY[1, 2], ARRAY[1, 2]);
 
--- Registrar Direcciones
+--3)Registrar Direcciones
 CALL registrar_direcciones(1, 'Santiago', 'Centro', 'Av. Libertador', '1234');
 
+--4) Filtrar productos por categoria
+select * from filtrar_categoria('Ropa');--cambiar categoria
+
+--5) filtrar ventas por fecha
+select * from filtrar_ventas('01-01-2024', '31-12-2024');--modificar fechas
+
+--6) Retornar el porcentaje de compras
+
+--7) Usuario con más descuento acumulado
+
+
+
+
+/*--------------------------------TRIGGERS---------------------------------*/
+--1) Verificador de rut------------------------------------------------------------
+--boleano del rut
+create or replace function validar_rut(rut VARCHAR(12))
+returns boolean as $$--me dirá si el rut es valido o no (true-false)
+declare
+    rut_numeros VARCHAR(10);
+	verificador_recibido CHAR(1);
+    verificador_calculado CHAR(1);
+    suma INT := 0;
+    resto INT;
+    verificador_esperado VARCHAR(1);
+begin
+    --paso1: separar el rut
+    rut_numeros := substring(rut from 1 for length(rut) - 1);
+    verificador_recibido := substring(rut from length(rut));
+
+    --paso2: calcular el verificador (predecir el que deberia ser)
+    for i in reverse 1..length(rut_numeros) loop
+        suma := suma + (substring(rut_numeros from i for 1)::INT * (i % 6 + 2));
+    end loop;
+
+    resto := suma % 11;
+
+    if resto == 1 then
+        verificador_esperado := 'K';
+    elsif resto == 0 then
+        verificador_esperado := '0';
+    else
+        verificador_esperado := cast(11 - resto as VARCHAR(1));
+    end if;
+
+    --pas3: verificar si es valido
+    verificador_calculado := case when verificador_esperado = 'K' then 'K' else cast(resto as VARCHAR(1)) end;
+
+    return verificador_calculado = verificador_recibido;
+end;
+$$ language plpgsql;
+
+--funcion para comprobar el booleano del rut (si es valido o no)
+create or replace function validar_usuario()
+returns trigger as $$
+begin
+	if validar_rut(New.Rut) then
+		return NEW;
+	else
+		raise exception 'El rut no es válido';
+	end if;
+end;
+$$ language plpgsql;
+
+--crear trigger
+create trigger trigger_rut
+before insert on Usuario
+for each row
+execute function validar_usuario();
+
+--2) Verificación del stock
+
+--trigger del stock
+create or replace function verificar_stock_disponible()
+returns trigger as $$
+declare
+	stock_disponible int;
+begin
+	select a.Cantidad into stock_disponible
+	from Articulo as a
+	where a.ID_articulo = new.ID_articulo;
+	
+	if stock_disponible >= new.Cantidad then
+		update Articulo
+		set Cantidad= Cantidad - new.cantidad
+		where ID_articulo = new.ID_articulo;
+	else
+		raise exception 'No hay stock disponible';
+	end if;
+	
+	return new;
+end;
+$$ language plpgsql;
+
+create trigger verificar_stock
+before insert on DetalleCompra
+for each row
+execute function verificar_stock_disponible();
+   
